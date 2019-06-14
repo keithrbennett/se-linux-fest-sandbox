@@ -1,0 +1,47 @@
+#!/usr/bin/env ruby
+#
+# push_all  Pushes commits and tags for the active branch to all remote repos.
+#
+
+BRANCH = `git rev-parse --abbrev-ref HEAD`.chomp
+REMOTES = `git remote -v`.split("\n").map { |line| line.split.first}.sort.uniq
+
+Result = Struct.new(:remote, :exit_code, :output)
+
+def push_one(remote)
+  output = `git push --tags #{remote} #{BRANCH} 2>&1`
+  exit_code = $?.exitstatus
+  Result.new(remote, exit_code, output)
+end
+
+def do_pushes
+  puts "Pushing branch #{BRANCH} to remote repos #{REMOTES}."
+  threads = REMOTES.map { |remote| Thread.new { push_one(remote) }}
+  threads.each(&:join)
+  threads.map(&:value) # return results as an array of Result's
+end
+
+def output_results(results)
+  results.each do |result|
+    puts %Q{\nRemote "#{result.remote}" returned #{result.exit_code}. Output was:\n#{result.output}\n}
+  end
+end
+
+def remotes_with_error(results)
+  results.select { |r| r.exit_code != 0 }.map(&:remote)
+end
+
+def output_error_message_if_error(error_remotes)
+  unless error_remotes.empty?
+    banner = ('!' * 79)
+    puts "\n\n#{banner}\nThere were errors in remotes #{error_remotes}.\n#{banner}\n\n"
+  end
+end
+
+
+results = do_pushes
+output_results(results)
+error_remotes = remotes_with_error(results)
+output_error_message_if_error(error_remotes)
+
+error_remotes.any? ? -1 : 0
